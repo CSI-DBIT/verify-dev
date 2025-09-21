@@ -1,4 +1,3 @@
-import { useSelector } from "react-redux";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -10,12 +9,12 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Link } from "react-router-dom";
-import { RootState } from "@/redux/store";
+import { useAuthStore } from "@/stores";
 import MemberSettings from "../members/MemberSettings";
 import OrgSettings from "../organizations/OrgSettings";
 
 const Settings = () => {
-  const { userType } = useSelector((state: RootState) => state.auth); // Access Redux store
+  const { userType } = useAuthStore();
 
   return (
     <main>

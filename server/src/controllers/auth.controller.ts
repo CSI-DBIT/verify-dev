@@ -1,16 +1,12 @@
 import { Elysia } from "elysia";
-import {
-  comparePassword,
-  getExpTimestamp,
-  hashPassword,
-} from "../configs/utils";
+import { hashPassword } from "../configs/utils";
 import { prisma } from "../configs/prisma.config";
 import { jwtPasswordResetTokenConfig } from "../configs/jwt.config";
 import { organizationAuthController } from "./organizationAuth.controller";
 import { memberAuthController } from "./memberAuth.controller";
-import { sendResetPasswordEmail } from "../emails/ResetPassword";
+import ResetPasswordEmail from "../emails/ResetPassword";
 import { forgotPasswordSchema, resetPasswordSchema } from "../configs/schemas";
-import { PASSWORD_RESET_TOKEN_EXP } from "../configs/constants";
+import { sendEmail } from "../services/email.service";
 
 export const authController = (app: Elysia) =>
   app.group("/auth", (app) =>
@@ -28,10 +24,12 @@ export const authController = (app: Elysia) =>
 
               // Check if the email belongs to an organization or a member
               const organization = await prisma.organization.findUnique({
-                where: { email },
+                where: { email, isDeleted: false },
               });
               const member = !organization
-                ? await prisma.member.findUnique({ where: { email } })
+                ? await prisma.member.findUnique({
+                    where: { email, isDeleted: false },
+                  })
                 : null;
 
               if (!organization && !member) {
@@ -48,19 +46,39 @@ export const authController = (app: Elysia) =>
                 resetToken = await jwt_password_reset_token.sign({
                   id: organization.orgId,
                   role: "organization",
-                  exp: getExpTimestamp(PASSWORD_RESET_TOKEN_EXP), // Token valid for 15 minutes
                 });
               }
               if (member) {
                 resetToken = await jwt_password_reset_token.sign({
                   id: member.memberId,
                   role: "member",
-                  exp: getExpTimestamp(PASSWORD_RESET_TOKEN_EXP), // Token valid for 15 minutes
                 });
               }
+              const resetLink = `${process.env.CLIENT_URL}/auth/reset-password?token=${resetToken}`;
 
-              sendResetPasswordEmail(email, resetToken);
-
+              if (member) {
+                sendEmail({
+                  from: "noreply@verifydev.com",
+                  to: email,
+                  subject: "Password Reset Request",
+                  component: await ResetPasswordEmail({
+                    userDetails: { name: member.memberName },
+                    resetLink,
+                      serverUrl: "http://localhost:4000",
+                    }),
+                  });
+                }else if(organization){
+                  sendEmail({
+                    from: "noreply@verifydev.com",
+                    to: email,
+                    subject: "Password Reset Request",
+                    component: await ResetPasswordEmail({
+                      userDetails: { name: organization.orgName },
+                      resetLink,
+                      serverUrl: "http://localhost:4000",
+                    }),
+                  });
+                }
               return { status: 200, message: "Password reset email sent" };
             }
           )
@@ -94,10 +112,10 @@ export const authController = (app: Elysia) =>
                 const entity =
                   role === "organization"
                     ? await prisma.organization.findUnique({
-                        where: { orgId: id as string },
+                        where: { orgId: id as string, isDeleted: false },
                       })
                     : await prisma.member.findUnique({
-                        where: { memberId: id as string },
+                        where: { memberId: id as string, isDeleted: false },
                       });
 
                 if (!entity) {
@@ -109,12 +127,12 @@ export const authController = (app: Elysia) =>
                 const hashedPassword = await hashPassword(newPassword);
                 if (role === "organization") {
                   await prisma.organization.update({
-                    where: { orgId: id as string },
+                    where: { orgId: id as string, isDeleted: false },
                     data: { password: hashedPassword },
                   });
                 } else if (role === "member") {
                   await prisma.member.update({
-                    where: { memberId: id as string },
+                    where: { memberId: id as string, isDeleted: false },
                     data: { password: hashedPassword },
                   });
                 }

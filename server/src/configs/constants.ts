@@ -1,5 +1,0 @@
-const ACCESS_TOKEN_EXP = 5 * 60; // 5 minutes
-const REFRESH_TOKEN_EXP = 7 * 86400; // 7 days
-const PASSWORD_RESET_TOKEN_EXP = 15 * 60; // 15 minutes
-const JWT_NAME = "jwt";
-export { ACCESS_TOKEN_EXP, REFRESH_TOKEN_EXP, JWT_NAME,PASSWORD_RESET_TOKEN_EXP };

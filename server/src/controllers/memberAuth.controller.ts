@@ -1,14 +1,9 @@
 import { Elysia } from "elysia";
-import {
-  comparePassword,
-  getExpTimestamp,
-  hashPassword,
-} from "../configs/utils";
+import { comparePassword, handleFileUpload, hashPassword } from "../configs/utils";
 import {
   jwtMemberAccessTokenConfig,
   jwtMemberRefreshTokenConfig,
 } from "../configs/jwt.config";
-import { ACCESS_TOKEN_EXP, REFRESH_TOKEN_EXP } from "../configs/constants";
 import { loginMemberSchema, signupMemberSchema } from "../configs/schemas";
 import { prisma } from "../configs/prisma.config";
 
@@ -32,9 +27,9 @@ export const memberAuthController = (app: Elysia) =>
               cookie: { refresh_token },
             }) => {
               try {
-                const { memberName, email, password, gender } = body;
+                const { memberName, email, password, gender, address, phoneNo, memberImg } = body;
                 const existingMember = await prisma.member.findUnique({
-                  where: { email },
+                  where: { email, isDeleted: false },
                 });
                 if (existingMember) {
                   set.status = 422;
@@ -45,36 +40,47 @@ export const memberAuthController = (app: Elysia) =>
                 }
 
                 const hashedPassword = await hashPassword(password);
+
+                let memberImgPath = "images/profile-pics/verifydev-default-men-profile.jpg";
+
+                if (memberImg) {
+                  memberImgPath = await handleFileUpload({
+                    file: memberImg,
+                    directory: "images/profile-pics",
+                  });
+                }
                 const newMember = await prisma.member.create({
                   data: {
                     memberName,
                     email,
-                    gender: gender,
+                    gender,
                     password: hashedPassword,
-                    memberImg:"public/images/profile-pics/verifydev-default-men-profile.jpg"
+                    phoneNo,
+                    memberImg: memberImgPath,
                   },
                 });
 
                 const accessToken = await jwt_member_access_token.sign({
                   memberId: newMember.memberId,
                   email: newMember.email,
-                  exp: getExpTimestamp(ACCESS_TOKEN_EXP),
                 });
                 const refreshToken = await jwt_member_refresh_token.sign({
                   memberId: newMember.memberId,
                   email: newMember.email,
-                  exp: getExpTimestamp(REFRESH_TOKEN_EXP),
                 });
 
-                await prisma.member.update({
+                await prisma.refreshToken.upsert({
                   where: { memberId: newMember.memberId },
-                  data: { refreshToken },
+                  update: { token: refreshToken, expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30) },
+                  create: { token: refreshToken, memberId: newMember.memberId, expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30) },
                 });
 
                 refresh_token.set({
                   value: refreshToken,
                   httpOnly: true,
-                  maxAge: getExpTimestamp(REFRESH_TOKEN_EXP),
+                  sameSite: "strict",
+                  secure: true,
+                  maxAge: 1000 * 60 * 60 * 24 * 30,
                 });
 
                 set.status = 201;
@@ -83,12 +89,12 @@ export const memberAuthController = (app: Elysia) =>
                   status: 201,
                   accessToken,
                 };
-              } catch (e: any) {
+              } catch (error) {
                 set.status = 500;
                 return {
                   message: "Unable to save member to the database!",
                   status: 500,
-                  error_msg: e,
+                  error,
                 };
               }
             }
@@ -111,7 +117,7 @@ export const memberAuthController = (app: Elysia) =>
               try {
                 const { email, password } = body;
                 const member = await prisma.member.findUnique({
-                  where: { email },
+                  where: { email, isDeleted: false },
                 });
                 if (
                   !member ||
@@ -124,23 +130,24 @@ export const memberAuthController = (app: Elysia) =>
                 const accessToken = await jwt_member_access_token.sign({
                   memberId: member.memberId,
                   email: member.email,
-                  exp: getExpTimestamp(ACCESS_TOKEN_EXP),
                 });
                 const refreshToken = await jwt_member_refresh_token.sign({
                   memberId: member.memberId,
                   email: member.email,
-                  exp: getExpTimestamp(REFRESH_TOKEN_EXP),
                 });
 
-                await prisma.member.update({
-                  where: { memberId: member.memberId }, // Adjust according to your Prisma model
-                  data: { refreshToken },
+                await prisma.refreshToken.upsert({
+                  where: { memberId: member.memberId },
+                  update: { token: refreshToken, expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30) },
+                  create: { token: refreshToken, memberId: member.memberId, expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30) },
                 });
 
                 refresh_token.set({
                   value: refreshToken,
                   httpOnly: true,
-                  maxAge: getExpTimestamp(REFRESH_TOKEN_EXP),
+                  sameSite: "strict",
+                  secure: true,
+                  maxAge: 1000 * 60 * 60 * 24 * 30,
                 });
 
                 set.status = 200;
@@ -149,12 +156,12 @@ export const memberAuthController = (app: Elysia) =>
                   status: 200,
                   accessToken,
                 };
-              } catch (e) {
+              } catch (error) {
                 set.status = 500;
                 return {
                   message: "Error logging in",
                   status: 500,
-                  error_msg: e,
+                  error,
                 };
               }
             }
@@ -189,11 +196,16 @@ export const memberAuthController = (app: Elysia) =>
 
             const member = await prisma.member.findUnique({
               where: {
-                memberId: String(memberData.memberId),
+                memberId: memberData.memberId as string,
+                isDeleted: false,
               },
             });
 
-            if (!member || member.refreshToken !== refreshTokenCookie.value) {
+            const refreshTokenData = await prisma.refreshToken.findFirst({
+              where: { token: refreshTokenCookie.value, memberId: memberData.memberId as string },
+            });
+
+            if (!member || !refreshTokenData || refreshTokenData.token !== refreshTokenCookie.value) {
               set.status = 403;
               return { status: 403, message: "Invalid refresh token" };
             }
@@ -201,33 +213,34 @@ export const memberAuthController = (app: Elysia) =>
             const newAccessToken = await jwt_member_access_token.sign({
               memberId: member.memberId,
               email: member.email,
-              exp: getExpTimestamp(ACCESS_TOKEN_EXP),
             });
 
             const newRefreshToken = await jwt_member_refresh_token.sign({
               memberId: member.memberId,
               email: member.email,
-              exp: getExpTimestamp(REFRESH_TOKEN_EXP),
             });
 
-            await prisma.member.update({
+            await prisma.refreshToken.upsert({
               where: { memberId: member.memberId },
-              data: { refreshToken: newRefreshToken },
+              update: { token: newRefreshToken, expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30) },
+              create: { token: newRefreshToken, memberId: member.memberId, expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30) },
             });
 
             refresh_token.set({
               value: newRefreshToken,
               httpOnly: true,
-              maxAge: getExpTimestamp(REFRESH_TOKEN_EXP),
+              sameSite: "strict",
+              secure: true,
+              maxAge: 1000 * 60 * 60 * 24 * 30,
             });
 
             return { status: 200, accessToken: newAccessToken };
-          } catch (e) {
+          } catch (error) {
             set.status = 500;
             return {
               status: 500,
               message: "Error refreshing token",
-              error: e,
+              error,
             };
           }
         }
@@ -251,29 +264,31 @@ export const memberAuthController = (app: Elysia) =>
 
             const member = await prisma.member.findUnique({
               where: {
-                memberId: String(memberData.memberId), // Adjust according to your Prisma model
+                memberId: memberData.memberId as string,
+                isDeleted: false,
               },
             });
 
             if (member) {
-              await prisma.member.update({
-                where: { memberId: member.memberId }, // Adjust according to your Prisma model
-                data: { refreshToken: null }, // Invalidate the refresh token
+              await prisma.refreshToken.delete({
+                where: { token: refreshTokenCookie.value, memberId: member.memberId },
               });
             }
 
             refresh_token.set({
               value: null,
               httpOnly: true,
+              sameSite: "strict",
+              secure: true,
               maxAge: 0, // Clear the cookie
             });
 
             return { status: 200, message: "Logged out successfully" };
-          } catch (e) {
+          } catch (error) {
             return {
               status: 500,
               message: "Error logging out",
-              error: e,
+              error,
             };
           }
         }

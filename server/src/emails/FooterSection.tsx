@@ -1,7 +1,11 @@
 import { Img, Section, Text } from "@react-email/components";
 import React from "react";
 
-export const FooterSection = ({ serverUrl }) => (
+interface FooterSectionProps {
+  serverUrl: string;
+}
+
+export const FooterSection: React.FC<FooterSectionProps> = ({ serverUrl }) => (
   <Section className="bg-zinc-800 p-4 rounded-lg text-xs text-zinc-400 mt-6">
     <div className="flex justify-center items-center">
       <Img

@@ -1,6 +1,5 @@
 import { refreshToken } from '@/api/authApi';
-import { setAccessToken } from '@/redux/slices/authSlice';
-import { store } from '@/redux/store';
+import { useAuthStore } from '@/stores';
 import axios from 'axios';
 
 const apiClient = axios.create({
@@ -9,7 +8,7 @@ const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use((config) => {
-  const accessToken = store.getState().auth.accessToken;
+  const accessToken = useAuthStore.getState().accessToken;
   if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`;
   }
@@ -23,7 +22,7 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
       const newAccessToken = await refreshToken();
-      store.dispatch(setAccessToken(newAccessToken));
+      useAuthStore.getState().setAccessToken(newAccessToken);
       originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
       return apiClient(originalRequest);
     }

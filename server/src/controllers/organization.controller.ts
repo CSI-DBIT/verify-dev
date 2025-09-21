@@ -12,6 +12,8 @@ import {
   updateSocialUrlSchema,
 } from "../configs/schemas";
 import { unlinkSync } from "node:fs";
+import { EventType, MembershipStatus, OrgType } from "@prisma/client";
+import path from "node:path";
 
 export const organizationController = (app: Elysia) =>
   app.group("/organizations", (app) =>
@@ -39,24 +41,17 @@ export const organizationController = (app: Elysia) =>
               try {
                 const organizations = await prisma.organization.findMany({
                   where: {
-                    deletedAt: null, // Exclude soft-deleted organizations
+                    isDeleted: false,
                   },
-                  select: {
-                    orgId: true,
-                    orgName: true,
-                    description: true,
-                    logo: true,
+                  include: {
+                    members: true,
+                    events: true,
+                    socialUrls: true,
+                    eventCategories: true,
                     _count: {
                       select: {
                         members: true,
                         events: true,
-                      },
-                    },
-                    // Include social URLs directly
-                    socialUrls: {
-                      select: {
-                        platform: true,
-                        url: true,
                       },
                     },
                   },
@@ -90,7 +85,19 @@ export const organizationController = (app: Elysia) =>
                     }
 
                     const organization = await prisma.organization.findUnique({
-                      where: { orgId },
+                      where: { orgId, isDeleted: false },
+                      include: {
+                        events: true,
+                        members: true,
+                        socialUrls: true,
+                        eventCategories: true,
+                        _count: {
+                          select: {
+                            members: true,
+                            events: true,
+                          },
+                        },
+                      },
                     });
 
                     if (!organization) {
@@ -120,8 +127,7 @@ export const organizationController = (app: Elysia) =>
                     app.patch("", async ({ params, body, set }) => {
                       try {
                         const { orgId } = params;
-                        const baseDir = "public/images/profile-pics/";
-                        let orgLogoUrl = body.logo?.name;
+                        let orgLogoUrl = "";
 
                         // Fetch the existing organization to get the current logo path
                         const existingOrganization =
@@ -140,11 +146,13 @@ export const organizationController = (app: Elysia) =>
 
                         // Check if a new logo file is uploaded
                         if (body.logo) {
-                          const newFileName = `${baseDir}${crypto.randomUUID()}.png`;
+                          const baseDir = path.join(process.cwd(), "public/images/profile-pics/");
+                          const extension = path.extname(body.logo.name);
+                          const newFileName = `${baseDir}${crypto.randomUUID()}${extension}`;
 
                           // Delete the existing logo file from the server if it exists
                           if (existingOrganization.logo) {
-                            unlinkSync(existingOrganization.logo);
+                            unlinkSync(path.join(baseDir, existingOrganization.logo));
                           }
 
                           // Save the new logo file to the server
@@ -159,6 +167,7 @@ export const organizationController = (app: Elysia) =>
                             data: {
                               ...body,
                               logo: orgLogoUrl,
+                              type: body.type as OrgType,
                             },
                           });
 
@@ -176,7 +185,7 @@ export const organizationController = (app: Elysia) =>
                 )
 
                 // Membership Routes
-                .group("/membership", (app) =>
+                .group("/memberships", (app) =>
                   app
                     // Get all memberships of an organization
                     .get("", async ({ set, params }) => {
@@ -184,7 +193,7 @@ export const organizationController = (app: Elysia) =>
                         const { orgId } = params;
 
                         const memberships = await prisma.membership.findMany({
-                          where: { organizationId: orgId, deletedAt: null },
+                          where: { organizationId: orgId, isDeleted: false },
                           include: {
                             member: true, // Include member details if needed
                           },
@@ -212,13 +221,15 @@ export const organizationController = (app: Elysia) =>
                           async ({ params, body, set }) => {
                             try {
                               const { membershipId } = params;
-                              const { status } = body; // Example field that can be updated
+                              const { status, role, startDate } = body; // Example field that can be updated
 
                               const updatedMembership =
                                 await prisma.membership.update({
                                   where: { id: membershipId },
                                   data: {
-                                    status, // Only update the status for example, add other fields as needed
+                                    status,
+                                    role,
+                                    startDate,
                                   },
                                 });
 
@@ -234,32 +245,6 @@ export const organizationController = (app: Elysia) =>
                           }
                         )
                     )
-
-                    // Delete a membership by ID
-                    .delete("/:membershipId", async ({ params, set }) => {
-                      try {
-                        const { membershipId } = params;
-
-                        await prisma.membership.update({
-                          where: { id: membershipId },
-                          data: {
-                            deletedAt: new Date(),
-                          },
-                        });
-
-                        set.status = 200;
-                        return {
-                          message: "Membership deleted successfully",
-                          status: 200,
-                        };
-                      } catch (e) {
-                        set.status = 500;
-                        return {
-                          message: "Unable to delete membership!",
-                          status: 500,
-                        };
-                      }
-                    })
                 )
 
                 // Event Routes
@@ -271,9 +256,9 @@ export const organizationController = (app: Elysia) =>
                         const { orgId } = params;
 
                         const events = await prisma.event.findMany({
-                          where: { organizationId: orgId, deletedAt: null },
+                          where: { organizationId: orgId, isDeleted: false },
                           include: {
-                            category: true,
+                            organization: true,
                             participants: {
                               include: {
                                 certificate: true,
@@ -308,8 +293,8 @@ export const organizationController = (app: Elysia) =>
                               description,
                               eventPoster,
                               categoryId,
-                              isMemberOnly,
                               eventDate,
+                              type,
                             } = body;
                             const baseDir = "public/images/event-poster/";
                             // Check if a file was uploaded
@@ -328,10 +313,10 @@ export const organizationController = (app: Elysia) =>
                                 eventName,
                                 description,
                                 eventPoster: eventPosterUrl,
-                                categoryId,
-                                isMemberOnly,
+                                category: categoryId,
                                 eventDate,
                                 organizationId: orgId,
+                                type: type as EventType,
                               },
                             });
 

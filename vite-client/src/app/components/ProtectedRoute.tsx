@@ -1,15 +1,14 @@
 // ProtectedRoute.tsx
 import { Navigate } from "react-router-dom";
-import { useSelector } from "react-redux";
-import { RootState } from "@/redux/store";
+import { useAuthStore } from "@/stores";
 
 interface ProtectedRouteProps {
   requiredRole?: 'MEMBER' | 'ORGANIZATION';
   children: JSX.Element,
 }
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ requiredRole,children }) => {
-  const { isAuthenticated, userType } = useSelector((state: RootState) => state.auth);
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ requiredRole, children }) => {
+  const { isAuthenticated, userType } = useAuthStore();
 
   // Redirect to login if not authenticated
   if (!isAuthenticated) {

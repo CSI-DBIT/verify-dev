@@ -7,8 +7,7 @@ import {
   updateSocialUrlSchema,
 } from "../configs/schemas";
 import { jwtMemberAccessTokenConfig } from "../configs/jwt.config";
-import { parseArgs } from "node:util";
-import { unlinkSync } from "node:fs";
+import { handleFileUpload } from "../configs/utils";
 
 export const membersController = (app: Elysia) =>
   app.group("/members", (app) =>
@@ -24,7 +23,6 @@ export const membersController = (app: Elysia) =>
         const member = await jwt_member_access_token.verify(bearers_token);
         return { member };
       })
-      // Validating required properties using Guard schema
       .guard(
         {
           beforeHandle({ member, set }) {
@@ -34,31 +32,17 @@ export const membersController = (app: Elysia) =>
         (app) =>
           app.group("/:memberId", (app) =>
             app
-              // .derive(async ({ set, params }) => {
-              //   const { memberId } = params;
-              //   const existingMember = await prisma.member.findUnique({
-              //     where: { memberId },
-              //   });
-              //   if (!existingMember) {
-              //     set.status = 404;
-              //     return {
-              //       message: "Member not found!",
-              //       status: 404,
-              //     };
-              //   }
-              //   return existingMember;
-              // })
-              .get("", async ({ params }) => {
+              .get("", async ({ params, set }) => {
                 const { memberId } = params;
 
                 try {
                   // Fetch the member details
                   const member = await prisma.member.findUnique({
-                    where: { memberId },
+                    where: { memberId, isDeleted: false },
                     include: {
                       memberships: {
                         include: {
-                          organization: true, // Include organization details
+                          organization: true,
                         },
                       },
                     },
@@ -76,23 +60,24 @@ export const membersController = (app: Elysia) =>
                     where: {
                       participants: {
                         some: {
-                          email: member.email, // Matching by email
+                          email: member.email,
                         },
                       },
                     },
                     include: {
-                      category: true, // Include event category
+                      organization: true,
                     },
                   });
 
-                  // Fetch certificates received by the member for attended events
+                  // Fetch certificates received by the member
                   const certificates = await prisma.certificate.findMany({
                     where: {
-                      participant: {
+                      Member: {
                         some: {
-                          email: member.email, // Matching by email
-                        },
+                          memberId: member.memberId
+                        }
                       },
+                      isDeleted: false,
                     },
                   });
 
@@ -108,6 +93,7 @@ export const membersController = (app: Elysia) =>
                     organizations,
                   };
                 } catch (error) {
+                  set.status = 500;
                   return {
                     message: "Unable to fetch member details!",
                     status: 500,
@@ -122,53 +108,48 @@ export const membersController = (app: Elysia) =>
                   app.patch("", async ({ set, params, body }) => {
                     const { memberId } = params;
                     try {
-                      const baseDir = "public/images/profile-pics/";
-                      let memberProfileUrl = body.memberImg?.name;
+                      let memberImgPath;
 
-                      // Fetch the existing member to get the current profile img path
-                      const existingMember = await prisma.member.findUnique({
-                        where: { memberId },
-                        select: { memberImg: true },
-                      });
-
-                      if (!existingMember) {
-                        set.status = 404;
-                        return {
-                          message: "Member not found!",
-                          status: 404,
-                        };
-                      }
-
-                      // Check if a new logo file is uploaded
+                      // Handle profile image upload if provided
                       if (body.memberImg) {
-                        const newFileName = `${baseDir}${crypto.randomUUID()}.png`;
-
-                        // Delete the existing profile img file from the server if it exists
-                        if (existingMember.memberImg) {
-                          unlinkSync(existingMember.memberImg);
+                        try {
+                          memberImgPath = await handleFileUpload({
+                            file: body.memberImg,
+                            directory: "images/profile-pics",
+                          });
+                        } catch (uploadError: any) {
+                          console.error("Profile image upload failed:", uploadError);
+                          set.status = 400;
+                          return {
+                            message: "Profile image upload failed",
+                            error: uploadError.message,
+                          };
                         }
-
-                        // Save the new logo file to the server
-                        await Bun.write(newFileName, body.memberImg);
-                        memberProfileUrl = newFileName;
                       }
 
+                      // Update member data
                       const updatedMember = await prisma.member.update({
                         where: { memberId },
                         data: {
-                          ...body,
-                          memberImg: memberProfileUrl,
+                          ...(body.memberName && { memberName: body.memberName }),
+                          ...(body.gender && { gender: body.gender }),
+                          ...(body.address && { address: body.address }),
+                          ...(body.phoneNo && { phoneNo: body.phoneNo }),
+                          ...(memberImgPath && { memberImg: memberImgPath }),
                         },
                       });
 
+                      set.status = 200;
                       return {
-                        message: "Member updated successfully!",
+                        message: "Member updated successfully",
                         member: updatedMember,
                       };
-                    } catch (error) {
+                    } catch (updateError: any) {
+                      console.error("Member update error:", updateError);
+                      set.status = 500;
                       return {
-                        message: "Unable to update member info!",
-                        status: 500,
+                        message: "Unable to update member!",
+                        error: updateError.message,
                       };
                     }
                   })
@@ -182,7 +163,7 @@ export const membersController = (app: Elysia) =>
                       const { memberId } = params;
 
                       const socialUrls = await prisma.socialUrl.findMany({
-                        where: { memberId: memberId, deletedAt: null },
+                        where: { memberId: memberId, isDeleted: false },
                       });
 
                       set.status = 200;
@@ -246,7 +227,7 @@ export const membersController = (app: Elysia) =>
                           const updatedUrls = await Promise.all(
                             urls.map(async ({ urlId, url }) => {
                               return await prisma.socialUrl.update({
-                                where: { urlId, deletedAt: null }, // Ensure URL isn't deleted
+                                where: { urlId, isDeleted: false },
                                 data: { url },
                               });
                             })
@@ -271,8 +252,8 @@ export const membersController = (app: Elysia) =>
                       const { urlId } = params;
 
                       await prisma.socialUrl.update({
-                        where: { urlId, deletedAt: null }, // Ensure URL isn't already deleted
-                        data: { deletedAt: new Date() },
+                        where: { urlId, isDeleted: false },
+                        data: { isDeleted: true },
                       });
 
                       set.status = 200;

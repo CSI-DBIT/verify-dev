@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["driverAdapters"]
@@ -11,109 +8,171 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Organization Model
+generator prismabox { 
+  provider = "prismabox"
+  typeboxImportDependencyName = "elysia"
+  typeboxImportVariableName = "t"
+  inputModel = true
+  output   = "../generated/prismabox"
+} 
+
+//
+// Enums
+//
+enum OrgType {
+  FREE_FOR_ALL
+  PRIVATE
+  INVITE_ONLY
+}
+
+enum MembershipStatus {
+  ACTIVE
+  INACTIVE
+  EXPIRED
+}
+
+enum MembershipRole {
+  MEMBER
+  CORE
+}
+
+enum EventType {
+  MEMBER_ONLY
+  OPEN_TO_ALL
+  POINTS_BASED
+}
+
+enum EventStatus {
+  SCHEDULED
+  ONGOING
+  COMPLETED
+}
+
+enum ParticipantStatus {
+  REGISTERED
+  ATTENDED
+}
+
+enum ParticipantType {
+  MEMBER
+  NONMEMBER
+  OUTSIDER
+}
+
+enum MessageType {
+  REGULAR
+  RATE
+  VOTE
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum NotificationType {
+  JOIN_REQUEST
+  MEMBER_JOINED
+  WELCOME
+}
+
+//
+// Models
+//
 model Organization {
   orgId             String          @id @default(uuid())
   orgName           String
-  description       String
+  description       String?
   email             String          @unique
   emailVerified     Boolean         @default(false)
   password          String
-  type              String          @default("FREE_FOR_ALL") // Access type
-  category          String // Business type/category
+  type              OrgType         @default(FREE_FOR_ALL)
+  category          String
   logo              String?
   address           String?
   phoneNo           String?
-  alternatePhoneNo  String?
   startDate         DateTime
+  reputationCredits Int             @default(1000)
+
+  // Relations
   eventCategories   EventCategory[]
   socialUrls        SocialUrl[]     @relation("OrganizationSocialUrls")
   members           Membership[]
   events            Event[]
   notifications     Notification[]  @relation("OrganizationNotifications")
-  chatRoomId        String          @unique
   chatRoom          ChatRoom?
-  reputationCredits Int             @default(1000)
-  refreshToken      String?
+  chatRoomMessages  Message[]       @relation("OrganizationMessages")
+  refreshTokens     RefreshToken[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
+  isDeleted Boolean   @default(false)
 
-  chatRoomMessages Message[] @relation("OrganizationMessages")
+  @@index([email])
 }
 
-// Member Model
 model Member {
   memberId         String   @id @default(uuid())
   memberName       String
-  about            String
+  about            String?
   email            String   @unique
   emailVerified    Boolean  @default(false)
   password         String
-  gender           String
+  gender           Gender?
   phoneNo          String?
-  alternatePhoneNo String?
   memberImg        String?
-  memberStatus     String?
-  birthdate         DateTime
+  birthdate        DateTime?
   country          String?
-  city             String?
-  occupation       String?
-  companyName      String?
 
-  loyaltyCredits Int @default(1000)
+  loyaltyCredits   Int       @default(1000)
+  feedbackCount    Int       @default(0)
+  commentsCount    Int       @default(0)
 
-  feedbackCount   Int            @default(0)
-  commentsCount   Int            @default(0)
-  favouriteEvents Event[]
-  memberships     Membership[]
-  socialUrls      SocialUrl[]    @relation("MemberSocialUrls")
-  notifications   Notification[] @relation("MemberNotifications")
-  certificates    Certificate[]
-  participations  Participant[]
-  refreshToken    String?
+  // Relations
+  favouriteEvents  Event[]   @relation("FavouriteEvents")
+  memberships      Membership[]
+  socialUrls       SocialUrl[]    @relation("MemberSocialUrls")
+  notifications    Notification[] @relation("MemberNotifications")
+  certificates     Certificate[]
+  participations   Participant[]
+  messages         Message[]      @relation("MemberMessages")
+  refreshTokens    RefreshToken[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-
-  messages Message[] @relation("MemberMessages")
+  isDeleted Boolean   @default(false)
 }
 
 model ChatRoom {
-  chatRoomId String    @id @default(uuid())
-  messages   Message[]
-
+  chatRoomId     String       @id @default(uuid())
   organizationId String       @unique
   organization   Organization @relation(fields: [organizationId], references: [orgId])
+  messages       Message[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
-// Message Model
 model Message {
   messageId      String        @id @default(uuid())
-  content        String // Content of the message (e.g., poll question, text, etc.)
+  content        String
+  messageType    MessageType
+  rating         Int? // only for RATE
+  upvotes        Int? // only for VOTE
+  downvotes      Int? // only for VOTE
+
   organizationId String?
   organization   Organization? @relation("OrganizationMessages", fields: [organizationId], references: [orgId])
   memberId       String?
   member         Member?       @relation("MemberMessages", fields: [memberId], references: [memberId])
-
-  chatRoomId String
-  chatRoom   ChatRoom @relation(fields: [chatRoomId], references: [chatRoomId])
-
-  messageType String // Type of the message (e.g., REGULAR, RATE, VOTE(upvote/downvote)) 
-  rating      Int? // Rating score (if the message is a rating)
-  upvotes     Int? // Number of upvotes (if the message is an upvote)
-  downvotes   Int? // Number of downvotes (if the message is a downvote)
+  chatRoomId     String
+  chatRoom       ChatRoom      @relation(fields: [chatRoomId], references: [chatRoomId])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
-// EventCategory Model
 model EventCategory {
   categoryId     String       @id @default(uuid())
   name           String
@@ -122,10 +181,11 @@ model EventCategory {
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
+  isDeleted Boolean   @default(false)
+
+  @@unique([name, organizationId, isDeleted])
 }
 
-// SocialUrl Model
 model SocialUrl {
   urlId          String        @id @default(uuid())
   platform       String
@@ -137,134 +197,157 @@ model SocialUrl {
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
+  isDeleted Boolean   @default(false)
+
+  @@index([platform, url, organizationId])
+  @@index([platform, url, memberId])
 }
 
-// Membership Model
 model Membership {
-  id          String   @id @default(uuid())
-  startDate   DateTime @default(now())
-  status      String   @default("ACTIVE") //ACTIVE, INACTIVE, EXPIRED
-  role        String   @default("MEMBER") // MEMBER , CORE
-  isFavourite Boolean  @default(false)
+  id          String            @id @default(uuid())
+  startDate   DateTime          @default(now())
+  status      MembershipStatus  @default(ACTIVE)
+  role        MembershipRole    @default(MEMBER)
+  isFavourite Boolean           @default(false)
 
   memberId String
-  member   Member @relation(fields: [memberId], references: [memberId])
+  member   Member       @relation(fields: [memberId], references: [memberId])
 
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [orgId])
+  organization   Organization  @relation(fields: [organizationId], references: [orgId])
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
+  isDeleted Boolean   @default(false)
+
+  @@unique([memberId, organizationId, isDeleted])
+  @@index([organizationId])
+  @@index([memberId])
 }
 
-// Event Model
 model Event {
   eventId        String        @id @default(uuid())
   eventName      String
   description    String?
   eventPoster    String?
-  type           String // MEMBER_ONLY, OPEN_TO_ALL, POINTS_BASED
+  type           EventType
   category       String
-  pointsRequired Int? // Points needed to attend (for POINTS_BASED events)
+  pointsRequired Int?
   eventDate      DateTime
-  status         String        @default("SCHEDULED") // SCHEDULED , ONGOING, COMPLETED
+  status         EventStatus   @default(SCHEDULED)
   attachmentUrl  String?
   reportUrl      String?
-  participants   Participant[]
 
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [orgId])
+  organization   Organization  @relation(fields: [organizationId], references: [orgId])
+  participants   Participant[]
+  favouredByMembers Member[]   @relation("FavouriteEvents")
+  feedbacks      EventFeedbacks[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
+  isDeleted Boolean   @default(false)
 
-  favouredByMembers Member[]
-  EventFeedbacks    EventFeedbacks[]
-
+  @@unique([eventName, organizationId, isDeleted])
   @@index([eventDate])
   @@index([organizationId])
+  @@index([status])
 }
 
 model EventFeedbacks {
   id            String      @id @default(uuid())
-  rating        Int // 1-5 rating or any scale
-  feedback      String? // Text feedback from participant
+  rating        Int
+  feedback      String?
   eventId       String
   event         Event       @relation(fields: [eventId], references: [eventId])
   participantId String      @unique
   participant   Participant @relation(fields: [participantId], references: [participantId])
 }
 
-// Participant Model
 model Participant {
-  participantId String    @id @default(uuid())
+  participantId String     @id @default(uuid())
   name          String
   email         String
-  gender        String?
+  gender        Gender?
   phoneNo       String?
   address       String?
   registeredAt  DateTime?
-  status        String    @default("REGISTERED") // REGISTERED, ATTENDED
-  feedback      String?
-  type          String //MEMBER, NONMEMBER, OUTSIDER
+  status        ParticipantStatus @default(REGISTERED)
+  type          ParticipantType
   isMember      Boolean
 
-  member   Member? @relation(fields: [memberId], references: [memberId])
   memberId String?
+  member   Member?  @relation(fields: [memberId], references: [memberId])
 
   eventId String
-  event   Event  @relation(fields: [eventId], references: [eventId])
+  event   Event     @relation(fields: [eventId], references: [eventId])
 
-  certificate    Certificate?
-  EventFeedbacks EventFeedbacks?
+  certificate Certificate?
+  feedback    EventFeedbacks?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
+  isDeleted Boolean   @default(false)
 
-  @@unique([email, eventId])
+  @@unique([email, eventId, isDeleted])
   @@index([eventId])
   @@index([email])
 }
 
-// Certificate Model
 model Certificate {
   certificateId   String    @id @default(uuid())
   certificateCode String    @unique
   certificateUrl  String?
   issuedAt        DateTime?
 
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-
-  // Certificate linked to a participant (one-to-one relationship)
   participantId String?      @unique
   participant   Participant? @relation(fields: [participantId], references: [participantId])
-
-  // Certificate linked to a member (one-to-one relationship)
   memberId String?
-  member   Member? @relation(fields: [memberId], references: [memberId])
+  member   Member?       @relation(fields: [memberId], references: [memberId])
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  isDeleted Boolean   @default(false)
+
+  @@index([issuedAt])
 }
 
-// Notification Model
 model Notification {
-  notificationId String  @id @default(uuid())
-  type           String // e.g., "JOIN_REQUEST", "MEMBER_JOINED", "WELCOME"
+  notificationId String           @id @default(uuid())
+  type           NotificationType
   message        String
-  isRead         Boolean @default(false) // To track if the notification is read or unread
+  isRead         Boolean          @default(false)
 
-  // Optional relation fields for notification context
-  memberId String?
-  member   Member? @relation("MemberNotifications", fields: [memberId], references: [memberId])
+  memberId       String?
+  member         Member?          @relation("MemberNotifications", fields: [memberId], references: [memberId])
 
   organizationId String?
-  organization   Organization? @relation("OrganizationNotifications", fields: [organizationId], references: [orgId])
+  organization   Organization?    @relation("OrganizationNotifications", fields: [organizationId], references: [orgId])
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
+  isDeleted Boolean   @default(false)
+
+  @@index([memberId])
+  @@index([organizationId])
+  @@index([isRead])
+}
+
+//
+// NEW RefreshToken model
+//
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  memberId       String? @unique
+  member         Member?       @relation(fields: [memberId], references: [memberId])
+
+  organizationId String? @unique
+  organization   Organization? @relation(fields: [organizationId], references: [orgId])
+
+  @@index([memberId])
+  @@index([organizationId])
+  @@index([expiresAt])
 }

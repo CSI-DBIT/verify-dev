@@ -2,7 +2,19 @@ import * as React from "react";
 import { Tailwind, Section, Text, Button, Img } from "@react-email/components";
 import { FooterSection } from "./FooterSection";
 
-const ResetPasswordSuccessEmail = ({ userDetails, serverUrl, clientUrl }) => {
+interface ResetPasswordSuccessEmailProps {
+  userDetails: {
+    name: string;
+  };
+  serverUrl: string;
+  clientUrl: string;
+}
+
+const ResetPasswordSuccessEmail: React.FC<ResetPasswordSuccessEmailProps> = ({
+  userDetails,
+  serverUrl,
+  clientUrl,
+}) => {
   return (
     <Tailwind>
       <Section className="flex justify-center items-center w-full min-h-screen bg-zinc-800 text-white font-sans">
@@ -29,7 +41,7 @@ const ResetPasswordSuccessEmail = ({ userDetails, serverUrl, clientUrl }) => {
   );
 };
 
-ResetPasswordSuccessEmail.PreviewProps = {
+(ResetPasswordSuccessEmail as any).PreviewProps = {
     userDetails: {
       name: "Rahul",
     },

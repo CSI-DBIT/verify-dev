@@ -2,7 +2,19 @@ import * as React from "react";
 import { Tailwind, Section, Text, Button, Img } from "@react-email/components";
 import { FooterSection } from "./FooterSection";
 
-const AccountCreationEmail = ({ userDetails, accountType, serverUrl, clientUrl }) => {
+interface AccountCreationEmailProps {
+  userDetails: { name: string };
+  accountType: string;
+  serverUrl: string;
+  clientUrl: string;
+}
+
+const AccountCreationEmail: React.FC<AccountCreationEmailProps> = ({
+  userDetails,
+  accountType,
+  serverUrl,
+  clientUrl,
+}) => {
   return (
     <Tailwind>
       <Section className="flex justify-center items-center w-full min-h-screen bg-zinc-800 text-white font-sans">
@@ -25,7 +37,7 @@ const AccountCreationEmail = ({ userDetails, accountType, serverUrl, clientUrl }
           </Text>
           <Button
             href={`${clientUrl}/login`}
-            className="bg-blue-600 rounded-lg text-center px-4 py-2 font-medium text-white mt-4 hover:bg-blue-700"
+            className="bg-blue-600 rounded-lg text-center px-4 py-2 font-medium text-white mt-4"
           >
             Log In to Your Account
           </Button>
@@ -39,13 +51,13 @@ const AccountCreationEmail = ({ userDetails, accountType, serverUrl, clientUrl }
   );
 };
 
-AccountCreationEmail.PreviewProps = {
+(AccountCreationEmail as any).PreviewProps = {
   userDetails: {
-    name: "Rahul",
+    name: "Rahul"
   },
-  accountType: "organization", // or "organization"
+  accountType: "organization",
   serverUrl: "http://localhost:4000",
-  clientUrl: "http://localhost:3000",
+  clientUrl: "http://localhost:3000"
 };
 
 export default AccountCreationEmail;

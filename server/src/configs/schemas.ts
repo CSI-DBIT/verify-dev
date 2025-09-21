@@ -1,3 +1,4 @@
+import { MembershipRole, MembershipStatus } from "@prisma/client";
 import { t } from "elysia";
 
 export const signupOrganizationSchema = t.Object({
@@ -8,7 +9,9 @@ export const signupOrganizationSchema = t.Object({
   type: t.String(),
   category: t.String(),
   startDate: t.Date(),
-  logo: t.String(),
+  logo: t.Optional(t.File({
+    type: ["image/png", "image/jpeg", "image/jpg"],
+  })),
 });
 export const loginOrganizationSchema = t.Object({
   email: t.String({ format: "email" }),
@@ -18,10 +21,10 @@ export const loginOrganizationSchema = t.Object({
 export const updatedOrganizationSchema = t.Partial(
   t.Object({
     orgName: t.String({ maxLength: 60, minLength: 3 }),
-    description: t.String({ maxLength: 150, minLength: 1 }),
+    description: t.String({ maxLength: 200, minLength: 1 }),
     type: t.String(),
     logo: t.File({
-      type: "image/png",
+      type: ["image/png", "image/jpeg", "image/jpg"],
     }),
     address: t.String({ maxLength: 200 }),
     phoneNo: t.String({ maxLength: 20 }),
@@ -35,8 +38,8 @@ export const signupMemberSchema = t.Object({
   password: t.String({ minLength: 8 }),
   gender: t.Enum({ male: "MALE", female: "FEMALE", other: "OTHER" }),
   address: t.Optional(t.String({ maxLength: 200 })),
-  phoneNo: t.Optional(t.String({ maxLength: 10 })),
-  memberImg: t.String(),
+  phoneNo: t.Optional(t.String({ maxLength: 20 })),
+  memberImg: t.Optional(t.File({ type: ["image/png", "image/jpeg", "image/jpg"] })),
 });
 
 export const loginMemberSchema = t.Object({
@@ -49,8 +52,8 @@ export const updateMemberSchema = t.Partial(
     memberName: t.String({ maxLength: 60, minLength: 3 }),
     gender: t.Enum({ male: "MALE", female: "FEMALE", other: "OTHER" }),
     address: t.String({ maxLength: 200 }),
-    phoneNo: t.String({ maxlength: 20 }),
-    memberImg: t.File({ type: "image/png" }),
+    phoneNo: t.String({ maxLength: 20 }),
+    memberImg: t.File({ type: ["image/png", "image/jpeg", "image/jpg"] }),
   })
 );
 
@@ -90,12 +93,13 @@ export const addEventSchema = t.Object({
   description: t.String({ maxLength: 150, minLength: 1 }),
   eventPoster: t.Optional(
     t.File({
-      type: "image/png",
+      type: ["image/png", "image/jpeg", "image/jpg"],
     })
   ),
   categoryId: t.String(),
   isMemberOnly: t.Boolean(),
   eventDate: t.Date(),
+  type: t.String(),
 });
 
 export const updateEventSchema = t.Partial(addEventSchema);
@@ -104,9 +108,12 @@ export const createMembershipSchema = t.Object({
   organizationId: t.Optional(t.String()),
   memberId: t.Optional(t.String()),
 });
-export const updateMembershipSchema = t.Object({
-  status: t.String(),
-});
+export const updateMembershipSchema = t.Partial(t.Object({
+  status: t.Enum(MembershipStatus),
+  role: t.Enum(MembershipRole),
+  isFavourite: t.Boolean(),
+  startDate: t.Date(),
+}));
 
 export const forgotPasswordSchema = t.Object({
   email: t.String({ format: "email" }),
@@ -115,4 +122,11 @@ export const forgotPasswordSchema = t.Object({
 export const resetPasswordSchema = t.Object({
   resetToken: t.String(),
   newPassword: t.String({ minLength: 8 }),
+});
+
+
+export const eventFeedbackSchema = t.Object({
+  rating: t.Number(),
+  feedback: t.Optional(t.String()),
+  participantId: t.String()
 });

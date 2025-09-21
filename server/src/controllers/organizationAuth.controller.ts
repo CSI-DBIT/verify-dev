@@ -1,19 +1,12 @@
 import { Elysia } from "elysia";
-import {
-  comparePassword,
-  getExpTimestamp,
-  hashPassword,
-} from "../configs/utils";
-import { ACCESS_TOKEN_EXP, REFRESH_TOKEN_EXP } from "../configs/constants";
-import {
-  loginOrganizationSchema,
-  signupOrganizationSchema,
-} from "../configs/schemas";
-import { prisma } from "../configs/prisma.config";
+import { comparePassword, handleFileUpload, hashPassword } from "../configs/utils";
 import {
   jwtOrgAccessTokenConfig,
   jwtOrgRefreshTokenConfig,
 } from "../configs/jwt.config";
+import { loginOrganizationSchema, signupOrganizationSchema } from "../configs/schemas";
+import { prisma } from "../configs/prisma.config";
+import { OrgType } from "@prisma/client";
 
 export const organizationAuthController = (app: Elysia) =>
   app.group("/organization-auth", (app) =>
@@ -35,54 +28,46 @@ export const organizationAuthController = (app: Elysia) =>
               cookie: { refresh_token },
             }) => {
               try {
-                const {
-                  orgName,
-                  description,
-                  email,
-                  password,
-                  type,
-                  category,
-                  startDate,
-                } = body;
+                const { orgName, email, password, type, category, startDate, logo } = body;
 
-                // Check if organization acc with email exists
-                const existingOrganization =
-                  await prisma.organization.findUnique({
-                    where: { email },
-                  });
+                // Check if organization already exists
+                const existingOrganization = await prisma.organization.findUnique({
+                  where: { email },
+                });
 
                 if (existingOrganization) {
                   set.status = 422;
                   return {
-                    message: "Organization with this email already exists!",
-                    status: 422,
-                  };
-                }
-                // Check if member acc with email exists
-                const existingMember = await prisma.member.findUnique({
-                  where: { email },
-                });
-
-                if (existingMember) {
-                  set.status = 422;
-                  return {
-                    message: "Member with this email already exists!",
+                    message: "Organization with the email already exists!",
                     status: 422,
                   };
                 }
 
-                // Hash password and create organization
+                let logoPath = "images/profile-pics/verifydev-default-organization-profile.png";
+
+                // Handle logo upload if provided
+                if (logo) {
+                  try {
+                    logoPath = await handleFileUpload({
+                      file: logo,
+                      directory: "images/profile-pics",
+                    });
+                  } catch (error) {
+                    console.error("Logo upload failed:", error);
+                    // Continue with default logo
+                  }
+                }
+
                 const hashedPassword = await hashPassword(password);
                 const newOrganization = await prisma.organization.create({
                   data: {
                     orgName,
-                    description,
                     email,
                     password: hashedPassword,
-                    type,
+                    type: type as OrgType,
                     category,
                     startDate,
-                    logo: "public/images/profile-pics/verifydev-default-organization-profile.png",
+                    logo: logoPath,
                   },
                 });
 
@@ -96,70 +81,59 @@ export const organizationAuthController = (app: Elysia) =>
                 ];
 
                 // Create default event categories for the new organization
-                await Promise.all(
-                  defaultCategories.map((category) =>
-                    prisma.eventCategory.create({
-                      data: {
-                        name: category.name,
-                        organizationId: newOrganization.orgId, // Link the category to the new organization
-                      },
-                    })
-                  )
-                );
+                await prisma.eventCategory.createMany({
+                  data: defaultCategories.map((category) => ({
+                    name: category.name,
+                    organizationId: newOrganization.orgId,
+                  })),
+                });
 
                 // Create chatroom for the organization
-                const chatRoom = await prisma.chatRoom.create({
+                await prisma.chatRoom.create({
                   data: {
                     organizationId: newOrganization.orgId,
                   },
-                });
-
-                const organizationWithChatRoom = await prisma.organization.findUnique({
-                  where: { orgId: newOrganization.orgId },
                   include: {
-                    chatRoom: true, // Include chatRoom details
-                    chatRoomMessages: true, // Include associated messages if needed
+                    messages: true,
                   },
                 });
-                console.log(organizationWithChatRoom);
 
-                // Generate tokens
                 const accessToken = await jwt_org_access_token.sign({
                   orgId: newOrganization.orgId,
                   email: newOrganization.email,
-                  exp: getExpTimestamp(ACCESS_TOKEN_EXP),
                 });
                 const refreshToken = await jwt_org_refresh_token.sign({
                   orgId: newOrganization.orgId,
                   email: newOrganization.email,
-                  exp: getExpTimestamp(REFRESH_TOKEN_EXP),
                 });
 
                 // Store refresh token
-                await prisma.organization.update({
-                  where: { orgId: newOrganization.orgId },
-                  data: { refreshToken },
+                await prisma.refreshToken.upsert({
+                  where: { organizationId: newOrganization.orgId },
+                  update: { token: refreshToken, expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30) },
+                  create: { token: refreshToken, organizationId: newOrganization.orgId, expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30) },
                 });
 
-                // Set cookie for refresh token
                 refresh_token.set({
                   value: refreshToken,
                   httpOnly: true,
-                  maxAge: getExpTimestamp(REFRESH_TOKEN_EXP),
+                  sameSite: "strict",
+                  secure: true,
+                  maxAge: 1000 * 60 * 60 * 24 * 30,
                 });
 
                 set.status = 201;
                 return {
-                  message: "Organization added successfully",
+                  message: "Organization registered successfully",
                   status: 201,
                   accessToken,
                 };
               } catch (error) {
                 set.status = 500;
                 return {
-                  message: "Unable to save entry to the database!",
+                  message: "Unable to register organization!",
                   status: 500,
-                  error,
+                  error
                 };
               }
             }
@@ -184,7 +158,7 @@ export const organizationAuthController = (app: Elysia) =>
 
                 // Fetch organization from database
                 const organization = await prisma.organization.findUnique({
-                  where: { email },
+                  where: { email, isDeleted: false },
                 });
 
                 if (
@@ -199,24 +173,25 @@ export const organizationAuthController = (app: Elysia) =>
                 const accessToken = await jwt_org_access_token.sign({
                   orgId: organization.orgId,
                   email: organization.email,
-                  exp: getExpTimestamp(ACCESS_TOKEN_EXP),
                 });
                 const refreshToken = await jwt_org_refresh_token.sign({
                   orgId: organization.orgId,
                   email: organization.email,
-                  exp: getExpTimestamp(REFRESH_TOKEN_EXP),
                 });
 
                 // Update organization refresh token
-                await prisma.organization.update({
-                  where: { orgId: organization.orgId },
-                  data: { refreshToken },
+                await prisma.refreshToken.upsert({
+                  where: { organizationId: organization.orgId },
+                  update: { token: refreshToken, expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30) },
+                  create: { token: refreshToken, organizationId: organization.orgId, expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30) },
                 });
 
                 refresh_token.set({
                   value: refreshToken,
                   httpOnly: true,
-                  maxAge: getExpTimestamp(REFRESH_TOKEN_EXP),
+                  sameSite: "strict",
+                  secure: true,
+                  maxAge: 1000 * 60 * 60 * 24 * 30,
                 });
 
                 set.status = 200;
@@ -242,7 +217,6 @@ export const organizationAuthController = (app: Elysia) =>
         }) => {
           try {
             const refreshToken = refresh_token.value;
-            console.log(refreshToken);
 
             if (!refreshToken) {
               set.status = 403;
@@ -258,10 +232,14 @@ export const organizationAuthController = (app: Elysia) =>
             }
 
             const organization = await prisma.organization.findUnique({
-              where: { orgId: String(organizationData.orgId) },
+              where: { orgId: organizationData.orgId as string, isDeleted: false },
             });
 
-            if (!organization || organization.refreshToken !== refreshToken) {
+            const refreshTokenData = await prisma.refreshToken.findFirst({
+              where: { token: refreshToken, organizationId: organizationData.orgId as string },
+            });
+
+            if (!organization || !refreshTokenData || refreshTokenData.token !== refreshToken) {
               set.status = 403;
               return {
                 status: 403,
@@ -272,24 +250,25 @@ export const organizationAuthController = (app: Elysia) =>
             const newAccessToken = await jwt_org_access_token.sign({
               orgId: organization.orgId,
               email: organization.email,
-              exp: getExpTimestamp(ACCESS_TOKEN_EXP),
             });
 
             const newRefreshToken = await jwt_org_refresh_token.sign({
               orgId: organization.orgId,
               email: organization.email,
-              exp: getExpTimestamp(REFRESH_TOKEN_EXP),
             });
 
-            await prisma.organization.update({
-              where: { orgId: organization.orgId },
-              data: { refreshToken: newRefreshToken },
+            await prisma.refreshToken.upsert({
+              where: { organizationId: organization.orgId },
+              update: { token: newRefreshToken, expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30) },
+              create: { token: newRefreshToken, organizationId: organization.orgId, expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30) },
             });
 
             refresh_token.set({
               value: newRefreshToken,
               httpOnly: true,
-              maxAge: getExpTimestamp(REFRESH_TOKEN_EXP),
+              sameSite: "strict",
+              secure: true,
+              maxAge: 1000 * 60 * 60 * 24 * 30,
             });
 
             return { status: 200, accessToken: newAccessToken };
@@ -315,12 +294,11 @@ export const organizationAuthController = (app: Elysia) =>
               return { status: 403, message: "Invalid refresh token" };
             }
 
-            await prisma.organization.update({
-              where: { orgId: String(organizationData.orgId) },
-              data: { refreshToken: null },
+            await prisma.refreshToken.delete({
+              where: { token: refreshToken, organizationId: organizationData.orgId as string },
             });
 
-            refresh_token.set({ value: null, httpOnly: true, maxAge: 0 });
+            refresh_token.set({ value: null, httpOnly: true, sameSite: "strict", secure: true, maxAge: 0 });
 
             return { status: 200, message: "Logged out successfully" };
           } catch (error) {
